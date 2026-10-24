@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DexArm Control</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/vendor/three/build/three.module.js",
+      "three/examples/jsm/": "/vendor/three/examples/jsm/",
+      "urdf-loader": "/vendor/urdf-loader/URDFLoader.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <aside id="left" class="panel">
+      <header class="brand">
+        <h1>DexArm</h1>
+        <span id="ws-status" class="pill">server…</span>
+      </header>
+
+      <button id="btn-kill" type="button" class="kill" aria-pressed="false"
+              title="Stop motion, flush queued commands and release the motors. Press again to re-arm.">
+        <span class="kill-title">KILL</span>
+        <span class="kill-sub">stop · flush queue · motors off</span>
+      </button>
+
+      <section>
+        <h2>Connection</h2>
+        <div class="conn-line"><span id="conn-dot" class="dot"></span><span id="conn-text">—</span></div>
+        <div id="conn-port" class="mono dim"></div>
+        <div id="conn-error" class="error-text" hidden></div>
+        <div class="row-buttons">
+          <button id="btn-disconnect" type="button">Disconnect</button>
+        </div>
+        <label class="check"><input type="checkbox" id="autoconnect"> Auto-connect when a DexArm is plugged in</label>
+      </section>
+
+      <section>
+        <h2>USB serial ports</h2>
+        <ul id="ports" class="ports"></ul>
+      </section>
+
+      <section>
+        <h2>Arm state</h2>
+        <dl id="armstate" class="kv"></dl>
+      </section>
+
+      <section class="limits">
+        <h2>Limits</h2>
+        <label class="inline" title="The arm is never sent below this. Set it to the table height for the attached module.">Minimum Z
+          <input id="z-min" type="number" min="-127" max="100" step="1" class="mono"> mm
+        </label>
+      </section>
+
+      <section class="actions">
+        <button id="btn-home" type="button" title="M1112: go to X0 Y300 Z0 and correct from encoders">Home</button>
+        <div class="motor-switch">
+          <span class="ms-title" id="motors-label">Motors</span>
+          <div class="ms-row">
+            <span class="ms-off">OFF</span>
+            <button id="motors-toggle" type="button" role="switch" aria-checked="false" aria-labelledby="motors-label"
+                    title="On: M17 (hold position). Off: M84 (release so the arm can be moved by hand)">
+              <span class="ms-knob"></span>
+            </button>
+            <span class="ms-on">ON</span>
+          </div>
+        </div>
+        <button id="btn-stop" type="button" class="stop" title="M410: stop immediately (key: Esc)">STOP</button>
+        <p class="hint">Esc stops the arm from anywhere on the page.</p>
+      </section>
+    </aside>
+
+    <main id="center">
+      <div id="viewport">
+        <div id="kill-banner" class="kill-banner" hidden>KILL SWITCH ON: motors released, all commands refused. Press the kill switch again to re-arm.</div>
+        <div class="legend">
+          <span><i class="sw solid"></i>Arm (encoders)</span>
+          <span id="legend-ghost" hidden><i class="sw ghost"></i>Commanded (firmware), if it differs</span>
+          <span><i class="sw dotm" style="--c:#ff9f1c"></i>Tool point</span>
+          <span><i class="sw dotm" style="--c:#3ecf8e"></i>Target</span>
+          <span><i class="sw dotm" style="--c:#d6deea"></i>Preview</span>
+          <span><i class="sw dotm" style="--c:#ffd166"></i>Cursor (drag arrows/squares, Shift = 10 mm)</span>
+        </div>
+        <div class="view-foot">
+          <button id="btn-layout" type="button" title="Switch between one view and four views"></button>
+          <label class="view-toggle check" title="Show or hide the traced 3D trajectories (recording continues)">
+            <input type="checkbox" id="show-trails" checked> Show trajectories</label>
+          <label class="view-debug check" title="Show where the firmware thinks the arm is (blue ghost), when that differs from the encoders">
+            <input type="checkbox" id="debug-ghost"> Debug: commanded pose</label>
+        </div>
+        <div id="viewer-msg" class="viewer-msg">Loading 3D model…</div>
+        <div id="cursor-menu" class="ctx-menu" role="menu" hidden>
+          <button type="button" role="menuitem" data-act="move">Move to</button>
+          <button type="button" role="menuitem" data-act="to-arm">Cursor to arm</button>
+          <button type="button" role="menuitemcheckbox" data-act="live"><span class="tick"></span>Live track</button>
+        </div>
+      </div>
+      <div id="bottom">
+      <div id="console">
+        <div id="log" class="mono"></div>
+        <form id="cmd-form" autocomplete="off">
+          <span class="prompt mono">&gt;</span>
+          <input id="cmd" class="mono" placeholder="G-code, e.g. M114   (↑/↓ history, paste multiple lines)" spellcheck="false">
+          <button type="submit">Send</button>
+        </form>
+      </div>
+      <div id="graph-panel">
+        <div class="graph-head">
+          <div class="rec-controls">
+            <button id="graph-rec" type="button" class="rec-btn" aria-pressed="true" title="Record (while the arm moves)">● REC</button>
+            <button id="graph-pause" type="button" class="rec-btn" aria-pressed="false" title="Hold: record nothing until REC">❚❚ PAUSE</button>
+            <button id="graph-clear" type="button" class="rec-btn" title="Reset the graph and the 3D trail">CLEAR</button>
+            <span id="graph-status" class="rec-status">Waiting for data</span>
+          </div>
+          <div class="graph-tools">
+            <label class="check" title="Only record when the tool point has moved at least the minimum delta since the last recorded point"><input type="checkbox" id="graph-movement-only" checked> Record movement only</label>
+            <label class="min-delta" title="Minimum movement before a new point is recorded (graph and 3D trail). Filters out jitter.">≥
+              <input type="number" id="graph-min-delta" min="0" step="0.1" value="1.0" class="mono"> mm</label>
+            <label class="check"><input type="checkbox" id="graph-motors-off"> Track when motors off</label>
+            <label class="check"><input type="checkbox" id="trail-visible" checked> Record 3D trail</label>
+          </div>
+        </div>
+        <div class="graph-wrap">
+          <canvas id="graph" tabindex="0" aria-label="Sensed position and joint angles over time"></canvas>
+        </div>
+        <div class="graph-foot">
+          <div id="graph-channels" class="legend-toggles" role="group" aria-label="Graph channels (click to show or hide)"></div>
+          <div class="hint graph-hint">Wheel zoom · Ctrl+wheel: time · Shift+wheel: values · drag: pan · F: fit values · Shift+F: whole timeline · L: live 10 s · A: fit all</div>
+        </div>
+      </div>
+      <div id="bm-panel">
+        <div class="bm-head"><h2>Bookmarks <span id="bm-count" class="unit"></span></h2>
+          <label class="check bm-show-all" title="Show every bookmark in the 3D view (faded); the selected one is always shown">
+            <input type="checkbox" id="bm-show-all" checked> Show all bookmarks</label>
+        </div>
+        <div class="bm-actions">
+          <button id="bm-add-arm" type="button" title="Save where the arm is now (encoders)">Bookmark Arm</button>
+          <button id="bm-add-cursor" type="button" title="Save the 3D cursor position">Bookmark Cursor</button>
+        </div>
+        <div class="bm-actions">
+          <button id="bm-edit" type="button" disabled>Edit</button>
+          <button id="bm-rename" type="button" disabled>Rename</button>
+          <button id="bm-delete" type="button" disabled>Delete</button>
+        </div>
+        <div id="bm-editor" hidden>
+          <div class="bm-editor-title">Edit <span id="bm-editor-name"></span></div>
+          <div class="bm-xyz mono">
+            <label>X <input id="bm-x" type="number" step="0.1"></label>
+            <label>Y <input id="bm-y" type="number" step="0.1"></label>
+            <label>Z <input id="bm-z" type="number" step="0.1"></label>
+          </div>
+          <div id="bm-editor-err" class="bm-err"></div>
+          <div class="bm-actions bm-editor-actions">
+            <button id="bm-set-arm" type="button">Set to arm</button>
+            <button id="bm-set-cursor" type="button">Set to cursor</button>
+            <button id="bm-modify" type="button" class="primary">Modify</button>
+            <button id="bm-cancel" type="button">Cancel</button>
+          </div>
+        </div>
+        <ul id="bm-list" tabindex="0" aria-label="Bookmarks, newest first"></ul>
+        <p class="hint bm-hint">Click to select · double-click to move the arm there</p>
+      </div>
+      </div>
+    </main>
+
+    <aside id="right" class="panel">
+      <section class="cursor-section">
+        <h2>3D cursor <span class="unit">mm</span></h2>
+        <div class="cursor-coords mono">
+          <span>X <b id="cur-x">—</b></span><span>Y <b id="cur-y">—</b></span><span>Z <b id="cur-z">—</b></span>
+        </div>
+        <div id="cursor-error" class="error-text" hidden></div>
+        <div class="cursor-actions">
+          <button id="btn-move-to" type="button" title="Add a move to the cursor to the queue">Move to</button>
+          <button id="btn-cursor-to-arm" type="button" title="Put the cursor where the arm is holding (commanded position)">Cursor to arm</button>
+          <label class="check live"><input type="checkbox" id="live-track"> Live track</label>
+        </div>
+        <div class="path-settings" title="Move to, bookmarks, re-runs and live track go straight when the straight line is legal. Otherwise they curve around (or are refused if this is off). Jogs always go straight.">
+          <label class="check"><input type="checkbox" id="path-curve"> Curve around blocked paths</label>
+          <select id="path-style" aria-label="Curve style">
+            <option value="arc">Arc around base</option>
+            <option value="joint">Joint sweep</option>
+          </select>
+        </div>
+      </section>
+      <section>
+        <h2>Position <span class="unit">mm</span></h2>
+        <div id="rows-cart"></div>
+      </section>
+      <section>
+        <h2>Joints <span class="unit">degrees</span></h2>
+        <div id="rows-joint"></div>
+      </section>
+      <section>
+        <label class="inline">Feedrate
+          <input id="feedrate" type="number" min="100" max="20000" step="100" class="mono"> mm/min
+        </label>
+        <p id="jog-hint" class="hint">Click a value to type an exact target, then press Enter.</p>
+      </section>
+      <section class="ease">
+        <div class="ease-head">
+          <h2>Motion</h2>
+          <button id="ease-save" type="button" disabled title="M500: keep these after power-off">Save to arm</button>
+        </div>
+        <div class="slider-row" title="Top speed while live track follows the cursor">
+          <label for="live-feedrate">Live speed</label>
+          <input id="live-feedrate" type="range" min="100" max="6000" step="100">
+          <output id="live-feedrate-val" class="mono" for="live-feedrate">1200</output><span class="unit">mm/min</span>
+        </div>
+        <div class="slider-row" title="M204: how quickly moves speed up and slow down">
+          <label for="ease-accel">Acceleration</label>
+          <input id="ease-accel" type="range" min="10" max="600" step="10">
+          <output id="ease-accel-val" class="mono" for="ease-accel">–</output><span class="unit">mm/s²</span>
+        </div>
+        <div class="slider-row" title="M205: speed changes smaller than this happen instantly, without easing">
+          <label for="ease-jerk">Jerk</label>
+          <input id="ease-jerk" type="range" min="1" max="20" step="1">
+          <output id="ease-jerk-val" class="mono" for="ease-jerk">–</output><span class="unit">mm/s</span>
+        </div>
+        <p class="hint">Acceleration and jerk: lower = gentler (shipped at 60 mm/s² and 10 mm/s), from the next move. Save keeps them after power-off.</p>
+      </section>
+      <section class="queue-section">
+        <div class="queue-head">
+          <h2>Queue <span id="queue-count" class="unit"></span></h2>
+          <div class="queue-buttons">
+            <button id="btn-queue-toggle" type="button">Pause</button>
+            <button id="btn-queue-clear" type="button" title="Remove finished items, keep what's waiting">Clear history</button>
+            <button id="btn-queue-clear-all" type="button" title="Cancel everything waiting and remove all history">Clear all</button>
+          </div>
+        </div>
+        <div id="queue-note" class="hint" hidden></div>
+        <ol id="queue" class="queue"></ol>
+        <p class="hint">Newest at top. Double-click any item to queue it again.</p>
+      </section>
+    </aside>
+  </div>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

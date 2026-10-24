@@ -1,0 +1,17 @@
+# dependencies and build output
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+
+# fetched separately (scripts/fetch-urdf.sh)
+vendor/
+
+# per-machine data written by the app
+logs/
+settings.json
+bookmarks.yaml
+*.tmp
+
+# firmware images never go in this repo
+*.bin

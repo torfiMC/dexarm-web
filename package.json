@@ -1,0 +1,9 @@
+{
+  "name": "dexarm-web-vendor",
+  "private": true,
+  "description": "Front-end libraries served by the Python server (no build step)",
+  "dependencies": {
+    "three": "0.186.1",
+    "urdf-loader": "0.13.1"
+  }
+}
