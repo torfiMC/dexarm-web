@@ -24,22 +24,36 @@ jogging, a command queue, bookmarks, and graphs of where the arm went.
 
 ## Getting started
 
-You need a DexArm on USB, a Linux machine, and [uv](https://docs.astral.sh/uv/), npm and git.
+You need a DexArm on USB and a Linux machine with `curl`. The scripts install everything else.
 
 ```bash
 git clone https://github.com/<you>/dexarm-web.git
 cd dexarm-web
-npm install                      # 3D libraries (three.js, urdf-loader)
-scripts/fetch-urdf.sh            # the arm's 3D model, from Rotrics' GitHub
-sudo usermod -aG dialout $USER   # serial port access; log out and back in once
-uv run dexarm-web
+./install.sh       # one time: Python environment, 3D libraries, the arm's 3D model
+./run_server.sh    # start the server (runs install.sh first if anything is missing)
 ```
 
 Open **http://localhost:8080**, or `http://<machine>:8080` from another computer. The arm is found and connected
 automatically. Press **Home** before your first move.
 
+`install.sh` is safe to run again; it skips what's already there. It installs [uv](https://docs.astral.sh/uv/)
+if you don't have it, uses npm and git if they're available (and downloads directly if not), and tells you if your
+user can't access the serial port yet. `run_server.sh` passes options through, e.g. `./run_server.sh --port 9000`.
+
 > The server has no login and listens on your whole network, so anyone on it can move the arm.
-> Run `uv run dexarm-web --host 127.0.0.1` to keep it to this machine.
+> Run `./run_server.sh --host 127.0.0.1` to keep it to this machine.
+
+### Without the scripts
+
+The same steps by hand (needs [uv](https://docs.astral.sh/uv/), npm and git):
+
+```bash
+uv sync                                  # Python environment in .venv
+npm install                              # three.js and urdf-loader into node_modules
+git clone --depth 1 https://github.com/Rotrics-Dev/URDF-of-DexArm vendor/URDF-of-DexArm   # 3D model
+sudo usermod -aG dialout $USER           # serial port access; log out and back in once
+uv run dexarm-web                        # start the server
+```
 
 ## Resources
 
@@ -52,7 +66,7 @@ This repo contains only the web app. Everything else comes from Rotrics:
 | User manual and G-code reference | [manual.rotrics.com](https://manual.rotrics.com/) |
 | All source code | [github.com/Rotrics-Dev](https://github.com/Rotrics-Dev) |
 | Firmware source code (a Marlin fork). Not needed to run the app; we read it to port the kinematics and find the bugs below | [Marlin_For_DexArm](https://github.com/Rotrics-Dev/Marlin_For_DexArm) |
-| 3D model used by the 3D view | [URDF-of-DexArm](https://github.com/Rotrics-Dev/URDF-of-DexArm), fetched by `scripts/fetch-urdf.sh` |
+| 3D model used by the 3D view | [URDF-of-DexArm](https://github.com/Rotrics-Dev/URDF-of-DexArm), downloaded by `install.sh` |
 | Official desktop app (also does firmware updates) | [rotrics-studio-app](https://github.com/Rotrics-Dev/rotrics-studio-app) |
 | Python API examples | [DexArm_API](https://github.com/Rotrics-Dev/DexArm_API) |
 
@@ -106,7 +120,7 @@ More detail on the firmware (G-codes, kinematics, the update procedure) is in
 ## Options
 
 ```
-uv run dexarm-web --host 127.0.0.1 --port 8080 --urdf /path/to/URDF-of-DexArm/URDF
+./run_server.sh --host 127.0.0.1 --port 8080 --urdf /path/to/URDF-of-DexArm/URDF
 ```
 
 `DEXARM_URDF_DIR` can be used instead of `--urdf`. Tested with DexArm hardware V3.2 and firmware V2.3.5 on Linux.

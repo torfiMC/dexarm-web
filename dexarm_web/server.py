@@ -19,7 +19,7 @@ from .bookmarks import Bookmarks
 
 HERE = Path(__file__).parent
 PROJECT = HERE.parent
-# The arm's 3D model comes from https://github.com/Rotrics-Dev/URDF-of-DexArm (not bundled; see README).
+# The arm's 3D model comes from https://github.com/Rotrics-Dev/URDF-of-DexArm (not bundled; install.sh downloads it).
 URDF_CANDIDATES = [PROJECT / "vendor" / "URDF-of-DexArm" / "URDF", PROJECT.parents[1] / "URDF-of-DexArm" / "URDF"]
 
 
@@ -166,7 +166,7 @@ async def urdf():
     """The arm without the optional gripper/suction modules (everything after the Modules comment)."""
     d = urdf_dir()
     if d is None:
-        raise HTTPException(404, "DexArm.urdf not found: run scripts/fetch-urdf.sh or pass --urdf (see README)")
+        raise HTTPException(404, "DexArm.urdf not found: run ./install.sh or pass --urdf (see README)")
     text = (d / "DexArm.urdf").read_text()
     cut = text.find("<!-- Modules -->")
     if cut != -1:
@@ -281,7 +281,7 @@ def main():
         os.environ["DEXARM_URDF_DIR"] = args.urdf
     open_log_file()
     if urdf_dir() is None:
-        print("3D model not found: run scripts/fetch-urdf.sh (or pass --urdf). The 3D view stays empty until then.",
+        print("3D model not found: run ./install.sh (or pass --urdf). The 3D view stays empty until then.",
               flush=True)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
