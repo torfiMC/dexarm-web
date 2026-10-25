@@ -24,7 +24,11 @@ jogging, a command queue, bookmarks, and graphs of where the arm went.
 
 ## Getting started
 
-You need a DexArm on USB and a Linux machine with `curl`. The scripts install everything else.
+You need a DexArm on USB and a Linux machine with `curl`. 
+
+You also need to be able to run sudo on your machine, because serial port access is blocked by default to regular users.
+
+The scripts install everything else.
 
 ```bash
 git clone https://github.com/<you>/dexarm-web.git
@@ -40,10 +44,13 @@ automatically. Press **Home** before your first move.
 if you don't have it, uses npm and git if they're available (and downloads directly if not), and tells you if your
 user can't access the serial port yet. `run_server.sh` passes options through, e.g. `./run_server.sh --port 9000`.
 
-> The server has no login and listens on your whole network, so anyone on it can move the arm.
+### Security alert: The sever is open by default
+> The server has **no login and listens on your whole network**, so anyone on it can move the arm.
 > Run `./run_server.sh --host 127.0.0.1` to keep it to this machine.
 
-### Without the scripts
+> Ensure you are on a trusted network and that your firewall blocks out any unwanted access.
+
+### Install and run manually
 
 The same steps by hand (needs [uv](https://docs.astral.sh/uv/), npm and git):
 
@@ -73,19 +80,21 @@ This repo contains only the web app. Everything else comes from Rotrics:
 ## How it works
 
 **The screen.**
-- **Left:** connection, arm state, minimum Z, Home, the Motors switch, STOP and KILL.
+- **Left panel:** connection, arm state, minimum Z, Home, the Motors switch, STOP and KILL.
 - **Middle:** the 3D view, with a console, a graph and bookmarks below it.
-- **Right:** the 3D cursor, jog buttons, motion settings and the queue.
+- **Right panel:** the 3D cursor, jog buttons, motion settings and the queue.
 
 <p align="center">
   <img src="docs/four-views.png" alt="Four-view layout: perspective, top, front and side views" width="100%">
 </p>
 
 **Moving the arm.**
-- Every jog, typed value, Move to and console command goes into the **queue** and runs in order. Double-click a
-  past entry to run it again. Live-track moves are logged there too.
-- The **3D cursor** has drag handles. While you drag, guides show how far the arm can reach along that axis or
-  in that plane, and a dashed line previews the route the arm will take.
+- Drag the cursor either on one axis or on a plane. 
+- While you drag, guides show how far the arm can reach along that axis or that plane
+- A dashed line previews the route the arm will take.
+- All commands goes into the **queue** and are executed in order. 
+- Double-click a past entry to run a command again again. Live-track moves are logged there too.
+- The **3D cursor** has drag handles. 
 - If the straight line to a target passes somewhere the arm can't reach, such as the area right next to its base,
   the move **curves around the base** instead. This can be switched off.
 - **Bookmarks** save the arm or cursor position. Double-click one to go there. They're stored in `bookmarks.yaml`.
@@ -97,9 +106,13 @@ This repo contains only the web app. Everything else comes from Rotrics:
 - **Minimum Z** (default −105 mm) keeps the arm out of the table. Nothing is ever sent below it.
 - Jog buttons that would leave the reachable area turn red and stop at the edge instead.
 
-**Under the hood.** A Python server (FastAPI, pyserial) owns the serial port. It streams each move to the arm in
+## Under the hood
+
+ A Python server (FastAPI, pyserial) owns the serial port. It streams each move to the arm in
 short pieces, polls the position about four times a second, and pushes everything to the browser over a
-WebSocket. The front end is plain JavaScript with three.js, with no build step. Each run writes a log to
+WebSocket. 
+
+The front end is plain JavaScript with three.js, with no build step. Each run writes a log to
 `logs/`, including the last raw serial traffic if the connection drops.
 
 ## Issues we ran into
