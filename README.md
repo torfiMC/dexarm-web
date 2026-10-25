@@ -2,7 +2,7 @@
 
 ## Background
 
-I purchaed a Rotrics DexArm on Kickstarter back in 2019. I dusted it off recently now in 2026 but it didn't have the software support I needed so I put together this web interface that runs on Linux. It's quite rudimentary, doesn't have support for grabbers or complex sequences, but enough to build upon. It would be fun to extend this into an MCP server for agents to talk to and add some vision and capabilites to hook into inferred intelligence. 
+I purchased a Rotrics DexArm on Kickstarter back in 2019. I dusted it off recently now in 2026 but it didn't have the software support I needed so I put together this web interface that runs on Linux. It's quite rudimentary, doesn't have support for grabbers or complex sequences, but enough to build upon. It would be fun to extend this into an MCP server for agents to talk to and add some vision and capabilites to hook into inferred intelligence. 
 
 ## What it is
 
