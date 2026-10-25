@@ -97,7 +97,6 @@
         <div id="cursor-menu" class="ctx-menu" role="menu" hidden>
           <button type="button" role="menuitem" data-act="move">Move to</button>
           <button type="button" role="menuitem" data-act="to-arm">Cursor to arm</button>
-          <button type="button" role="menuitemcheckbox" data-act="live"><span class="tick"></span>Live track</button>
         </div>
       </div>
       <div id="bottom">
@@ -178,9 +177,8 @@
         <div class="cursor-actions">
           <button id="btn-move-to" type="button" title="Add a move to the cursor to the queue">Move to</button>
           <button id="btn-cursor-to-arm" type="button" title="Put the cursor where the arm is holding (commanded position)">Cursor to arm</button>
-          <label class="check live"><input type="checkbox" id="live-track"> Live track</label>
         </div>
-        <div class="path-settings" title="Move to, bookmarks, re-runs and live track go straight when the straight line is legal. Otherwise they curve around (or are refused if this is off). Jogs always go straight.">
+        <div class="path-settings" title="Cursor moves, Move to, bookmarks and re-runs go straight when the straight line is legal. Otherwise they curve around (or are refused if this is off). Jogs always go straight.">
           <label class="check"><input type="checkbox" id="path-curve"> Curve around blocked paths</label>
           <select id="path-style" aria-label="Curve style">
             <option value="arc">Arc around base</option>
@@ -197,9 +195,6 @@
         <div id="rows-joint"></div>
       </section>
       <section>
-        <label class="inline">Feedrate
-          <input id="feedrate" type="number" min="100" max="20000" step="100" class="mono"> mm/min
-        </label>
         <p id="jog-hint" class="hint">Click a value to type an exact target, then press Enter.</p>
       </section>
       <section class="ease">
@@ -207,10 +202,10 @@
           <h2>Motion</h2>
           <button id="ease-save" type="button" disabled title="M500: keep these after power-off">Save to arm</button>
         </div>
-        <div class="slider-row" title="Top speed while live track follows the cursor">
-          <label for="live-feedrate">Live speed</label>
-          <input id="live-feedrate" type="range" min="100" max="6000" step="100">
-          <output id="live-feedrate-val" class="mono" for="live-feedrate">1200</output><span class="unit">mm/min</span>
+        <div class="slider-row" title="Top speed for every move: cursor, Move to, bookmarks, jogs (console G1 with its own F keeps that F)">
+          <label for="speed">Speed</label>
+          <input id="speed" type="range" min="100" max="6000" step="100">
+          <output id="speed-val" class="mono" for="speed">3000</output><span class="unit">mm/min</span>
         </div>
         <div class="slider-row" title="M204: how quickly moves speed up and slow down">
           <label for="ease-accel">Acceleration</label>

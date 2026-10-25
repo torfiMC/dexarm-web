@@ -2,7 +2,7 @@
 
 One worker thread owns the port. It runs the command queue one job at a time
 (each move is waited out before the next job starts), polls position (M114) and
-encoders (M895) in between, and streams live-track moves when that's switched on.
+encoders (M895) in between. Releasing the 3D cursor queues a move there (see cursor_go).
 
 STOP (M410) bypasses everything: Marlin's emergency parser handles it at once,
 even while the arm is busy.
@@ -29,7 +29,6 @@ MISMATCH_LIMIT_MM = 6.0                     # same check in millimetres at the t
 ERROR_WORDS = ("beyond limit", "error", "unknown command", "halted", "kill")
 MAX_JOBS = 400                              # history kept in memory
 HOME_XYZ = (0.0, 300.0, 0.0)
-LIVE_MIN_STEP_MM = 0.5                      # ignore live-track changes smaller than this
 REACH_MARGIN = 1.5                          # mm inside the firmware's limits, so it never truncates a move
 Z_MIN_DEFAULT = -105.0                      # floor below which the arm is never sent (the table, for the attached module)
 Z_MIN_RANGE = (-127.0, 100.0)
@@ -122,8 +121,7 @@ class Arm:
         self._wire = collections.deque(maxlen=300)  # last raw serial lines, polls included (for crash reports)
         self._next_id = 1
         self._last_measured = None
-        self._live_sent = None              # last live-track target actually sent
-        self._live_err_logged = None
+        self._supersede = threading.Event() # a newer cursor move replaces the running one (soft stop, no M410)
         self.ser = None
         self.jobs = []
         self.paused = False
@@ -141,9 +139,8 @@ class Arm:
             "homed": False,
             "busy": False,
             "feedrate": 3000,
-            "live_feedrate": 1200,
             "z_min": Z_MIN_DEFAULT,
-            "path": {"curve": True, "style": "arc"},   # route around blocked straight paths (Move to, bookmarks, live)
+            "path": {"curve": True, "style": "arc"},   # route around blocked straight paths (cursor, Move to, bookmarks)
             "motion": {"accel": None, "jerk": None, "unsaved": False},  # ease in/out (M204 / M205)
             "last_error": None,
             "killed": False,
@@ -152,7 +149,6 @@ class Arm:
             "target_path": None,       # planned route [[x, y, z], ...] from the move's start to target
             "cursor": [0.0, 250.0, 0.0],
             "cursor_error": None,      # why the cursor position is unreachable, if it is
-            "live": False,
             "motion_id": 0,            # increments each time a command starts moving the arm
             "serial": None,            # {cmd_per_s, bytes_in_per_s, bytes_out_per_s, poll_ms}
         }
@@ -186,10 +182,6 @@ class Arm:
         if self.state["killed"]:
             self._log("error", f"Kill switch is on; ignored {label or job_label(spec)}")
             return
-        if self.state["live"]:
-            # live track holds the queue; a command the user just asked for takes over instead of waiting
-            self.update(live=False)
-            self._log("info", f"Live track off: {label or job_label(spec)} takes over")
         with self._lock:
             job = {"id": self._next_id, "spec": spec, "label": label or job_label(spec), "detail": "",
                    "status": "queued", "created": time.time(), "started": None, "finished": None,
@@ -267,7 +259,7 @@ class Arm:
             ids = {j["id"] for j in done}
             self.jobs = [j for j in self.jobs if j["id"] not in ids]
 
-    # ----- cursor & live tracking -----
+    # ----- cursor -----
 
     def set_cursor(self, xyz):
         xyz = [float(v) for v in xyz]
@@ -275,19 +267,20 @@ class Arm:
         self.update(cursor=xyz, cursor_error=err)
         self._wake.set()
 
-    def set_live(self, on):
-        if on:
-            if self.state["killed"]:
-                return self._log("error", "Kill switch is on; live track not started")
-            if self.state["conn"]["status"] != "connected":
-                return self._log("error", "Not connected; live track not started")
-            self._live_sent = None  # the worker re-syncs from the encoders and checks before the first move
-            self._live_err_logged = None
-            self._log("info", "Live track on: the arm follows the cursor (queue is held)")
-        elif self.state["live"]:
-            self._log("info", "Live track off")
-        self.update(live=bool(on))
-        self._wake.set()
+    def cursor_go(self, xyz):
+        """The cursor was released: move there. A newer drop replaces a cursor move that hasn't finished:
+        waiting ones are cancelled and a running one is cut short gently (it stops, then the new one starts)."""
+        self.set_cursor(xyz)
+        if self.state["killed"]:
+            return self._log("error", "Kill switch is on; cursor move ignored")
+        with self._lock:
+            for j in self.jobs:
+                if j["spec"].get("cursor") and j["status"] == "queued":
+                    j.update(status="cancelled", finished=time.time(), error="replaced by a newer cursor position")
+                if j["spec"].get("cursor") and j["status"] == "running":
+                    self._supersede.set()
+        xyz = [round(float(v), 1) for v in xyz]
+        self.add_job({"kind": "goto", "xyz": xyz, "cursor": True}, label=f"Cursor → {fmt_xyz(xyz)}")
 
     # ----- stopping -----
 
@@ -295,8 +288,6 @@ class Arm:
         """Stop motion now, abort the running job and cancel everything queued."""
         self._abort.set()
         self._needs_sync = True
-        if self.state["live"]:
-            self.update(live=False)
         n = self._cancel_queued("cancelled by STOP")
         ser = self.ser
         if ser is None:
@@ -327,7 +318,7 @@ class Arm:
         return z
 
     def set_motion(self, accel=None, jerk=None, save=False):
-        """Ease in/out. Applies before the next move, without waiting in the queue (which live track holds)."""
+        """Ease in/out. Applies before the next move, without waiting behind queued moves."""
         m = dict(self.state["motion"])
         if accel is not None:
             a = max(ACCEL_RANGE[0], min(float(accel), ACCEL_RANGE[1]))
@@ -344,14 +335,12 @@ class Arm:
         self._wake.set()
 
     def set_motors(self, on):
-        """Motors switch. Acts right away instead of waiting in the queue (which live track holds)."""
+        """Motors switch. Acts right away instead of waiting behind queued moves."""
         if self.state["killed"]:
             return self._log("error", "Kill switch is on; motors stay released")
         if on:
             self._need_release, self._need_engage = False, True
         else:
-            if self.state["live"]:
-                self.set_live(False)
             self._abort.set()  # cut a running move short
             with self._lock:
                 pending = any(j["status"] == "queued" for j in self.jobs)
@@ -403,9 +392,7 @@ class Arm:
                     self._needs_sync = False
                     self.update(motors="on")
                 if connected and not self.state["killed"]:
-                    if self.state["live"]:
-                        self._live_run()  # returns once the arm has reached the cursor
-                    elif not self.paused and (job := self._next_job()):
+                    if not self.paused and (job := self._next_job()):
                         self._run_job(job)
                         last_poll = time.time()
                         continue
@@ -413,7 +400,7 @@ class Arm:
                     self._poll()
                     last_poll = time.time()
                     self._report_io()
-                self._wake.wait(0.05 if self.state["live"] else POLL_INTERVAL)
+                self._wake.wait(POLL_INTERVAL)
                 self._wake.clear()
             except serial.SerialException as e:
                 self._lost(f"Connection lost: {e}")
@@ -445,13 +432,17 @@ class Arm:
 
     def _run_job(self, job):
         self._abort.clear()
+        self._supersede.clear()
         self._set_job(job, status="running", started=time.time())
         self.update(busy=True, last_error=None)
         try:
             self._execute(job)
             if self._abort.is_set():
                 raise Aborted()
-            self._set_job(job, status="done", finished=time.time())
+            if self._supersede.is_set():   # cut short (and waited out) for a newer cursor position
+                self._set_job(job, status="aborted", finished=time.time(), error="replaced by a newer cursor position")
+            else:
+                self._set_job(job, status="done", finished=time.time())
         except Aborted:
             self._set_job(job, status="aborted", finished=time.time(), error="stopped")
         except Refused as e:
@@ -695,7 +686,7 @@ class Arm:
                 state["refused"] = "firmware refused part of the move (beyond limit)"
 
         try:
-            while not self._abort.is_set() and not state["refused"]:
+            while not self._abort.is_set() and not self._supersede.is_set() and not state["refused"]:
                 p = next_piece()
                 if p is None:
                     break
@@ -771,86 +762,6 @@ class Arm:
         self._set_job(job, target=list(tgt), detail=f"→ {fmt_xyz(tgt)}")
         self._stream(start, [tgt], words.get("F", self.state["feedrate"]))
 
-    def _live_run(self):
-        """Follow the cursor in short pieces until the arm is there (or live track stops)."""
-        off = self.state["module_offset"]
-        if self._live_sent is None:
-            self._sync_from_encoders()
-            self._poll()
-            c = self.state["commanded"]
-            if not c or self._mismatch():
-                self._log("error", "Live track stopped: firmware and encoder positions disagree. Home the arm.")
-                self.update(live=False)
-                return
-            self._live_sent = (c["x"], c["y"], c["z"])
-            self._log("info", f"Live track starting from {fmt_xyz(self._live_sent)}")
-        feed = self.state["live_feedrate"]
-        first = [True]
-        entry = [None]   # queue entry for the live move in progress
-
-        def close_entry(status, error=None):
-            if entry[0]:
-                self._set_job(entry[0], status=status, finished=time.time(), error=error)
-                entry[0] = None
-
-        route = {"target": None, "pts": []}   # planned path toward the current cursor (straight or curved)
-
-        def next_piece():
-            if not self.state["live"] or self.state["killed"]:
-                return None
-            cursor = tuple(self.state["cursor"])
-            start = self._live_sent
-            if math.dist(cursor, start) < LIVE_MIN_STEP_MM:
-                return None
-            if route["target"] != cursor:
-                try:
-                    pts, kind = self._plan_route(start, cursor, off)
-                except Refused as e:
-                    # hold position rather than send anything the firmware would cut short
-                    self.update(cursor_error=str(e))
-                    route["target"] = None
-                    return None
-                route.update(target=cursor, pts=list(pts), kind=kind)
-                self.update(target_path=[list(start)] + [list(p) for p in pts])
-            # advance one step along the planned path
-            left, a, pts = step_mm(feed), start, route["pts"]
-            while pts and math.dist(a, pts[0]) <= left:
-                left -= math.dist(a, pts[0])
-                a = pts.pop(0)
-            if pts:
-                d = math.dist(a, pts[0])
-                a = tuple(a[k] + (pts[0][k] - a[k]) * left / d for k in range(3))
-            nxt = a
-            if entry[0] is None or entry[0]["target"] != list(cursor):
-                # a new live-track move (the cursor was released somewhere new): log it in the queue
-                close_entry("done", "redirected") if entry[0] else None
-                label = f"Live → {fmt_xyz(cursor)}"
-                if route.get("kind", "straight") != "straight":
-                    label += f"  ({ROUTE_LABEL[route['kind']]})"
-                entry[0] = self._record({"kind": "goto", "xyz": list(cursor)}, label, start, cursor)
-            self._live_sent = nxt
-            if first[0]:
-                first[0] = False
-                self.update(motion_id=self.state["motion_id"] + 1)
-            if not self.state["target_active"] or self.state["target"] != list(cursor):
-                self.update(target=list(cursor), target_active=True, motors="on")
-            return nxt
-
-        self._abort.clear()
-        try:
-            self._pipeline(next_piece, feed)
-            if entry[0]:
-                reached = math.dist(self._live_sent, entry[0]["target"]) < LIVE_MIN_STEP_MM
-                close_entry("done" if reached else "aborted",
-                            None if reached else self.state.get("cursor_error") or "live track stopped")
-        except (Refused, Aborted) as e:
-            self._live_sent = None
-            close_entry("failed" if isinstance(e, Refused) else "aborted", str(e) or None)
-            if isinstance(e, Refused):
-                self._log("error", f"Live track: {e}")
-        if self.state["target_active"]:
-            self.update(target_active=False)
-
     # =============== connection ===============
 
     def _connect(self, port):
@@ -910,7 +821,7 @@ class Arm:
                 ser.close()
             except Exception:
                 pass
-        self.update(commanded=None, measured=None, moving=False, busy=False, live=False, target_active=False)
+        self.update(commanded=None, measured=None, moving=False, busy=False, target_active=False)
 
     def _lost(self, msg):
         port = self.state["conn"]["port"]

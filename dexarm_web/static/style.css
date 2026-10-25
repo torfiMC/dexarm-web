@@ -195,9 +195,6 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .cursor-coords b { color: #ffd166; font-weight: 600; margin-left: 4px; }
 .cursor-coords.bad b { color: var(--bad); }
 .cursor-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
-.cursor-actions .live { margin-left: auto; align-items: center; color: var(--text); font-size: 13px; }
-.cursor-actions .live.on { color: #ffd166; font-weight: 600; }
-.live-speed { margin-top: 8px; font-size: 12px; }
 
 /* cursor right-click menu */
 .ctx-menu { position: absolute; z-index: 5; min-width: 160px; padding: 4px; display: grid; gap: 2px;
@@ -239,10 +236,6 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 @keyframes q-blink { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .queue li.running .st { animation: none; } }
 
-.live-speed { display: grid; grid-template-columns: auto 1fr 3.2em auto; align-items: center; gap: 8px; font-size: 12px; color: var(--muted, #8a94a2); }
-.live-speed input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
-.live-speed output { color: var(--text); text-align: right; }
-.live-speed .unit { font-size: 11px; }
 
 .view-foot { position: absolute; right: 12px; bottom: 10px; display: flex; align-items: center; gap: 8px; z-index: 3; }
 .view-foot button { font-size: 11px; padding: 3px 8px; }

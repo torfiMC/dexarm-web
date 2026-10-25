@@ -252,9 +252,7 @@ def handle(msg):
     elif t == "goto":
         arm.add_job({"kind": "goto", "xyz": [float(v) for v in msg["xyz"]]})
     elif t == "feedrate":
-        arm.update(feedrate=max(100.0, min(float(msg["value"]), 20000.0)))
-    elif t == "live_feedrate":
-        arm.update(live_feedrate=max(100.0, min(float(msg["value"]), 6000.0)))
+        arm.update(feedrate=max(100.0, min(float(msg["value"]), 6000.0)))
     elif t == "queue_pause":
         arm.set_paused(bool(msg["value"]))
     elif t == "rerun":
@@ -267,8 +265,8 @@ def handle(msg):
         arm.clear_all()
     elif t == "cursor":
         arm.set_cursor(msg["xyz"])
-    elif t == "live":
-        arm.set_live(bool(msg["value"]))
+    elif t == "cursor_go":
+        arm.cursor_go(msg["xyz"])
 
 
 def main():

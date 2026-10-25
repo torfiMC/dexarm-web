@@ -103,9 +103,8 @@ function render(s) {
 
   const zm = $('#z-min');
   if (document.activeElement !== zm && s.z_min != null) zm.value = s.z_min;
-  const fr = $('#feedrate');
-  if (document.activeElement !== fr) fr.value = s.feedrate;
-  const lfr = $('#live-feedrate');
+  const sp = $('#speed');
+  if (!sp.matches(':active')) { sp.value = s.feedrate; $('#speed-val').textContent = Math.round(s.feedrate); }
   const mo = s.motion || {};
   const online = s.conn?.status === 'connected';
   for (const [k, id, fmt] of [['accel', 'ease-accel', v => v.toFixed(0)], ['jerk', 'ease-jerk', v => v.toFixed(0)]]) {
@@ -115,7 +114,6 @@ function render(s) {
   }
   $('#ease-save').disabled = !online || !mo.unsaved;
   $('#ease-save').classList.toggle('unsaved', !!mo.unsaved);
-  if (!lfr.matches(':active')) { lfr.value = s.live_feedrate; $('#live-feedrate-val').textContent = s.live_feedrate; }
 
   const connected = conn.status === 'connected';
   const killed = !!s.killed;
@@ -216,7 +214,6 @@ function renderArmState(s) {
     ['Homed', s.homed ? 'yes' : 'not this session', s.homed ? 'ok' : 'warn'],
     ['Motors', s.motors, s.motors === 'off' ? 'warn' : ''],
     ['Motion', s.moving ? 'moving' : 'still'],
-    ['Live track', s.live ? 'ON' : 'off', s.live ? 'warn' : ''],
     ['Serial', s.serial ? `${s.serial.cmd_per_s} cmd/s · ${((s.serial.bytes_in_per_s + s.serial.bytes_out_per_s) / 1024).toFixed(1)} kB/s` : '—'],
     ['Poll round trip', s.serial?.poll_ms != null ? `${s.serial.poll_ms} ms` : '—'],
     ['Encoder vs cmd', tracking, trackCls],
@@ -339,7 +336,7 @@ function renderRows(s) {
 }
 
 function setControlsEnabled(on, why) {
-  document.querySelectorAll('.row-ctl button, .row-ctl input, #btn-move-to, #live-track')
+  document.querySelectorAll('.row-ctl button, .row-ctl input, #btn-move-to')
     .forEach(el => { el.disabled = !on; });
   const hint = $('#jog-hint');
   hint.textContent = why || 'Hover a button or type a value to preview it in 3D. Δ = commanded − encoder.';
@@ -363,13 +360,10 @@ function renderCursor(s) {
     lastCursor = s.cursor;
     showCursorCoords(lastCursor, s.cursor_error);
   }
-  const live = $('#live-track');
-  live.checked = !!s.live;
-  live.closest('label').classList.toggle('on', !!s.live);
 }
 
-// While dragging, only the page updates (coordinates and the red/yellow colour). The position goes to the
-// server once, when the drag ends, so live track moves the arm there instead of chasing every step.
+// While dragging, only the page updates (coordinates, colour, route preview). When the drag ends the arm moves
+// there, unless the spot is out of reach or no route gets there (then only the cursor moves).
 function onCursorDrag(xyz, final) {
   lastCursor = xyz;
   const ok = reachable(...xyz, moduleOffset());
@@ -377,7 +371,13 @@ function onCursorDrag(xyz, final) {
   let msg = ok ? null : "outside the arm's reach";
   if (final) {
     viewer?.setRoutePreview(null);
-    send({ type: 'cursor', xyz });
+    const c = state?.commanded;
+    const r = c && ok ? planRoute([c.x, c.y, c.z], xyz, moduleOffset(), state.path || {}) : null;
+    if (r?.pts && !state?.killed) send({ type: 'cursor_go', xyz });
+    else {
+      send({ type: 'cursor', xyz });
+      if (ok && r?.error) msg = `not moving: ${r.error}`;
+    }
   } else {
     // while dragging, preview the route the arm would take from where it is holding (same planner as the server)
     const c = state?.commanded;
@@ -393,12 +393,11 @@ function onCursorDrag(xyz, final) {
 
 $('#btn-move-to').onclick = () => { if (lastCursor) send({ type: 'goto', xyz: lastCursor }); };
 // Uses the commanded position (where the arm is holding), not the encoder reading, which trails by the
-// gear backlash; otherwise live track would make a small "catch-up" move.
+// gear backlash; otherwise the next move would start with a small "catch-up". Never moves the arm.
 $('#btn-cursor-to-arm').onclick = () => {
   const c = state?.commanded;
   if (c) send({ type: 'cursor', xyz: [c.x, c.y, c.z].map(v => +v.toFixed(1)) });
 };
-$('#live-track').addEventListener('change', ev => send({ type: 'live', value: ev.target.checked }));
 
 // Right-click on the cursor: same actions as the panel buttons. A right-drag still pans the view.
 const menu = $('#cursor-menu');
@@ -408,9 +407,8 @@ function hideMenu() { menu.hidden = true; }
 
 function showMenu(clientX, clientY) {
   const vp = $('#viewport').getBoundingClientRect();
-  const items = { move: $('#btn-move-to'), 'to-arm': $('#btn-cursor-to-arm'), live: $('#live-track') };
+  const items = { move: $('#btn-move-to'), 'to-arm': $('#btn-cursor-to-arm') };
   for (const b of menu.querySelectorAll('button')) b.disabled = items[b.dataset.act].disabled;
-  menu.querySelector('[data-act=live]').setAttribute('aria-checked', String(!!state?.live));
   menu.hidden = false;
   const x = Math.min(clientX - vp.left, vp.width - menu.offsetWidth - 4);
   const y = Math.min(clientY - vp.top, vp.height - menu.offsetHeight - 4);
@@ -423,7 +421,6 @@ menu.addEventListener('click', ev => {
   if (!b || b.disabled) return;
   if (b.dataset.act === 'move') $('#btn-move-to').click();
   if (b.dataset.act === 'to-arm') $('#btn-cursor-to-arm').click();
-  if (b.dataset.act === 'live') $('#live-track').click();  // toggles and fires "change", like the panel
   hideMenu();
 });
 
@@ -516,8 +513,7 @@ function renderQueue(q) {
 function renderQueueNote() {
   const note = $('#queue-note');
   let text = '';
-  if (state?.live) text = 'Live track is on. Adding a command switches it off and runs the queue.';
-  else if (queueState.paused) text = 'Paused: the running item finishes, nothing new starts.';
+  if (queueState.paused) text = 'Paused: the running item finishes, nothing new starts.';
   note.hidden = !text;
   note.textContent = text;
 }
@@ -590,7 +586,8 @@ $('#motors-toggle').onclick = ev => {
 };
 $('#btn-disconnect').onclick = () => send({ type: 'disconnect' });
 $('#autoconnect').onchange = ev => send({ type: 'autoconnect', value: ev.target.checked });
-$('#feedrate').addEventListener('change', ev => send({ type: 'feedrate', value: ev.target.value }));
+$('#speed').addEventListener('input', ev => { $('#speed-val').textContent = ev.target.value; });
+$('#speed').addEventListener('change', ev => send({ type: 'feedrate', value: ev.target.value }));
 for (const [id, key] of [['ease-accel', 'accel'], ['ease-jerk', 'jerk']]) {
   $('#' + id).addEventListener('input', ev => { $('#' + id + '-val').textContent = ev.target.value; });
   $('#' + id).addEventListener('change', ev => send({ type: 'motion', [key]: +ev.target.value }));
@@ -603,8 +600,6 @@ $('#z-min').addEventListener('change', ev => {
 });
 $('#z-min').addEventListener('keydown', ev => { if (ev.key === 'Enter') ev.target.blur(); });
 $('#ease-save').onclick = () => send({ type: 'motion', save: true });
-$('#live-feedrate').addEventListener('input', ev => { $('#live-feedrate-val').textContent = ev.target.value; });
-$('#live-feedrate').addEventListener('change', ev => send({ type: 'live_feedrate', value: ev.target.value }));
 function renderLayoutButton(layout) {
   $('#btn-layout').textContent = layout === 'quad' ? '▣ 1 view' : '⊞ 4 views';
 }

@@ -7,7 +7,7 @@ I purchased a Rotrics DexArm on Kickstarter back in 2019. I dusted it off recent
 ## What it is
 
 A web control panel for the **Rotrics DexArm** robot arm. Plug the arm into a Linux machine over USB, start the
-server, and control it from a browser. You get a live 3D view of the arm, a draggable 3D cursor the arm can follow,
+server, and control it from a browser. You get a live 3D view of the arm, a draggable 3D cursor that moves the arm when you drop it,
 jogging, a command queue, bookmarks, and graphs of where the arm went.
 
 <p align="center">
@@ -15,8 +15,7 @@ jogging, a command queue, bookmarks, and graphs of where the arm went.
 </p>
 
 - **See the arm:** a 3D model driven by the arm's own encoders, in one view or four (iso, top, front, side…).
-- **Move it:** jog buttons, typed coordinates, or drag the 3D cursor and press **Move to**, or turn on
-  **Live track** to have the arm follow it.
+- **Move it:** jog buttons, typed coordinates, bookmarks, or drag the 3D cursor and let go: the arm moves there.
 - **Stay safe:** every move is checked against the arm's reach and a minimum height before it is sent.
   STOP (Esc) and a KILL switch are always on screen.
 - **Remember and review:** bookmarks, a queue history you can replay, a graph of positions and joint angles,
@@ -93,7 +92,7 @@ This repo contains only the web app. Everything else comes from Rotrics:
 - While you drag, guides show how far the arm can reach along that axis or that plane
 - A dashed line previews the route the arm will take.
 - All commands goes into the **queue** and are executed in order. 
-- Double-click a past entry to run a command again again. Live-track moves are logged there too.
+- Double-click a past entry to run a command again. Cursor moves are logged there too; dropping the cursor again before the arm arrives replaces the unfinished move.
 - The **3D cursor** has drag handles. 
 - If the straight line to a target passes somewhere the arm can't reach, such as the area right next to its base,
   the move **curves around the base** instead. This can be switched off.
